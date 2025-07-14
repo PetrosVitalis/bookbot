@@ -9,8 +9,10 @@ def main():
 
     client = genai.Client(api_key=api_key)
     
-    res = client.models.generate_content(model="gemini-2.0-flash-001", contents="Why is Boot.dev such a great place to learn backend development? Use one paragraph maximum.")
+    res = client.models.generate_content(model="gemini-2.0-flash-001", contents="Does the rise of AI make it a bad idea to become backend developer? One paragraph.")
     print(res.text)
+    print("Prompt tokens: ", res.usage_metadata.prompt_token_count)
+    print("Response tokens: ", res.usage_metadata.candidates_token_count)
 
 if __name__ == "__main__":
     main()
