@@ -3,24 +3,20 @@ def main():
     from dotenv import load_dotenv
     import sys
     import argparse
-
+    from google import genai
+    
     load_dotenv()
     api_key = os.environ.get("GEMINI_API_KEY")
-    
-    from google import genai
 
     client = genai.Client(api_key=api_key)
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <prompt>")
-        sys.exit(1)
-    prompt = sys.argv[1]
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("prompt", type=str, help="Prompt to send to Gemini")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    args = parser.parse_args()
+    prompt = args.prompt
+
     from google.genai import types
 
-    messages = [
-        types.Content(role="user", parts=[types.Part(text=prompt)]),
-    ]    
-    
     system_prompt = """
     You are a helpful AI coding agent.
 
@@ -62,7 +58,6 @@ def main():
             "get_file_content": get_file_content,
             "run_python_file": run_python_file,
             "write_file": write_file,
-            
         }
         if verbose:
             print(f"Calling function: {function_name}({args})")
@@ -92,34 +87,57 @@ def main():
             ],
         )
 
-    res = client.models.generate_content(
-        model="gemini-2.0-flash-001",
-        contents=messages,
-        config=types.GenerateContentConfig(
-            tools=[available_functions], system_instruction=system_prompt
-        )
-    )
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument("prompt", type=str, help="Prompt to send to Gemini")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
-    args = parser.parse_args()
-                
-    # res = client.models.generate_content(model="gemini-2.0-flash-001", contents=prompt)
-    # Print function call info if present, else print text
-    if hasattr(res, "function_calls") and res.function_calls:
-        for function_call_part in res.function_calls:
-            print(f"Calling function: {function_call_part.name}({function_call_part.args})")
-            function_call_result = call_function(function_call_part, verbose=args.verbose)
-            # Check for .parts[0].function_response.response
-            try:
-                response = function_call_result.parts[0].function_response.response
-            except Exception:
-                raise RuntimeError("Function call did not return a valid response.")
-            if args.verbose:
-                print(f"-> {response}")
-    else:
-        print(res.text)
+    # Conversation loop
+    messages = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+    max_iterations = 20
+    iteration = 0
+    done = False
+    while iteration < max_iterations and not done:
+        try:
+            res = client.models.generate_content(
+                model="gemini-2.0-flash-001",
+                contents=messages,
+                config=types.GenerateContentConfig(
+                    tools=[available_functions], system_instruction=system_prompt
+                )
+            )
+        except Exception as e:
+            print(f"Error during LLM call: {e}")
+            break
+
+        # Add model response(s) to messages
+        candidates = getattr(res, "candidates", None)
+        if candidates:
+            for candidate in candidates:
+                if hasattr(candidate, "content"):
+                    messages.append(candidate.content)
+
+        # Handle function/tool calls
+        function_calls = getattr(res, "function_calls", None)
+        if function_calls:
+            for function_call_part in function_calls:
+                print(f" - Calling function: {function_call_part.name}")
+                function_call_result = call_function(function_call_part, verbose=args.verbose)
+                # Add tool response to messages
+                messages.append(function_call_result)
+                # Optionally print tool response if verbose
+                if args.verbose:
+                    try:
+                        response = function_call_result.parts[0].function_response.response
+                    except Exception:
+                        response = None
+                    if response is not None:
+                        print(f"-> {response}")
+        else:
+            # No function calls - check if we have a final text response
+            if hasattr(res, "text") and res.text:
+                print("Final response:")
+                print(res.text)
+                done = True
+                break
+        iteration += 1
+    if not done:
+        print("Max iterations reached or no final response.")
     if args.verbose:
         print("User prompt: ", prompt)
         print("Prompt tokens: ", getattr(res.usage_metadata, 'prompt_token_count', 'N/A'))
