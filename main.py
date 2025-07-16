@@ -62,6 +62,7 @@ def main():
             "get_file_content": get_file_content,
             "run_python_file": run_python_file,
             "write_file": write_file,
+            
         }
         if verbose:
             print(f"Calling function: {function_name}({args})")
